@@ -1,4 +1,5 @@
 import streamlit as st
+from sqlalchemy import text
 from db import get_engine
 
 st.set_page_config(
@@ -8,15 +9,15 @@ st.set_page_config(
 )
 
 st.title("Cori • Manutenção & OEE")
-
-
+st.caption("Streamlit • HostGator MySQL • GitHub Deploy")
 
 
 st.subheader("Status de conexão")
 try:
     engine = get_engine()
     with engine.connect() as conn:
-        conn.execute("SELECT 1")
+        # SQLAlchemy 2.x: use text(...) ou exec_driver_sql(...)
+        conn.execute(text("SELECT 1"))
     st.success("✅ Conectado ao MySQL.")
 except Exception as e:
     st.error(f"❌ Erro de conexão: {e}")
@@ -24,6 +25,6 @@ except Exception as e:
 st.divider()
 st.markdown("""
 ### Dicas
-- Ajuste os *Secrets* do app (MySQL) no Streamlit Cloud.
+- Configure os **Secrets** (MySQL) no Streamlit Cloud (Settings → Secrets).
 - Use as páginas no menu lateral para CRUD e lançamentos.
 """)
