@@ -31,28 +31,45 @@ def _load_os_record(engine, os_id: int):
     return None if df.empty else df.iloc[0].to_dict()
 
 def _inject_edit_state(rec, id2maqname, id2funcname):
-    # nomes (para os selectboxes)
-    st.session_state["os_ed_maquina_name"] = id2maqname.get(int(rec["id_maquina"]), "") if rec.get("id_maquina") else ""
-    st.session_state["os_ed_resp_name"]    = id2funcname.get(int(rec["id_funcionario"]), "—") if rec.get("id_funcionario") else "—"
+    """Armazena valores carregados do BD em chaves internas _prefill_* (não usadas por widgets)."""
+    st.session_state["_prefill_os_maquina_name"] = id2maqname.get(int(rec["id_maquina"]), "") if rec.get("id_maquina") else ""
+    st.session_state["_prefill_os_resp_name"]    = id2funcname.get(int(rec["id_funcionario"]), "—") if rec.get("id_funcionario") else "—"
+    st.session_state["_prefill_os_tipo"]      = str(rec.get("tipo_de_servico") or "")
+    st.session_state["_prefill_os_local"]     = str(rec.get("local_do_problema") or "")
+    st.session_state["_prefill_os_desc"]      = str(rec.get("descricao_do_problema") or "")
+    st.session_state["_prefill_os_concluido"] = int(rec.get("concluido") or 0)
+    st.session_state["_prefill_os_obs"]       = str(rec.get("observacao") or "")
+    st.session_state["_prefill_os_dti"] = _as_date(rec.get("datahora_inicio"))
+    st.session_state["_prefill_os_ti"]  = _as_time(rec.get("datahora_inicio"))
+    st.session_state["_prefill_os_dtf"] = _as_date(rec.get("datahora_fim"))
+    st.session_state["_prefill_os_tf"]  = _as_time(rec.get("datahora_fim"))
 
-    # textos e números
-    st.session_state["os_ed_tipo"]      = str(rec.get("tipo_de_servico") or "")
-    st.session_state["os_ed_local"]     = str(rec.get("local_do_problema") or "")
-    st.session_state["os_ed_desc"]      = str(rec.get("descricao_do_problema") or "")
-    st.session_state["os_ed_concluido"] = int(rec.get("concluido") or 0)
-    st.session_state["os_ed_obs"]       = str(rec.get("observacao") or "")
+def _apply_os_prefill_to_widgets():
+    """Copia _prefill_* para as keys dos widgets antes de renderizá-los."""
+    ss = st.session_state
+    map_simple = {
+        "os_ed_maquina_name": "_prefill_os_maquina_name",
+        "os_ed_resp_name": "_prefill_os_resp_name",
+        "os_ed_tipo": "_prefill_os_tipo",
+        "os_ed_local": "_prefill_os_local",
+        "os_ed_desc": "_prefill_os_desc",
+        "os_ed_concluido": "_prefill_os_concluido",
+        "os_ed_obs": "_prefill_os_obs",
+        "os_ed_dti": "_prefill_os_dti",
+        "os_ed_ti": "_prefill_os_ti",
+        "os_ed_dtf": "_prefill_os_dtf",
+        "os_ed_tf": "_prefill_os_tf",
+    }
+    for widget_key, prefill_key in map_simple.items():
+        if prefill_key in ss:
+            ss[widget_key] = ss[prefill_key]
 
-    # datas/horas
-    st.session_state["os_ed_dti"] = _as_date(rec.get("datahora_inicio"))
-    st.session_state["os_ed_ti"]  = _as_time(rec.get("datahora_inicio"))
-    st.session_state["os_ed_dtf"] = _as_date(rec.get("datahora_fim"))
-    st.session_state["os_ed_tf"]  = _as_time(rec.get("datahora_fim"))
 
 # ----------------- Setup -----------------
 st.title("🧾 Ordens de Serviço (Corretiva)")
 engine = get_engine()
 T = TABLES["os"]
-T_MO = TABLES["mo_os"]  # tabela mao_obra_os
+T_MO = TABLES["mo_os"]
 
 maqs  = options_maquinas(engine)        # id, nome, ativo
 funcs = options_funcionarios(engine)    # id, nome, cargo
@@ -78,15 +95,16 @@ with st.expander("➕ Nova Ordem de Serviço", expanded=False):
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        nome_maquina_new = st.selectbox("Máquina", MAQ_OPTS, key="os_new_maquina") if MAQ_OPTS else st.selectbox("Máquina", [], key="os_new_maquina")
+        if MAQ_OPTS:
+            nome_maquina_new = st.selectbox("Máquina", MAQ_OPTS, key="os_new_maquina")
+        else:
+            nome_maquina_new = st.selectbox("Máquina", [], key="os_new_maquina_empty")
         resp_opts_new = ["—"] + FUNC_OPTS
         nome_func_new = st.selectbox("Responsável (opcional)", resp_opts_new, index=0, key="os_new_resp")
         tipo_new = st.text_input("Tipo de serviço", key="os_new_tipo")
-
     with col2:
         local_new = st.text_input("Local do problema", key="os_new_local")
         desc_new  = st.text_area("Descrição do problema", key="os_new_desc")
-
     with col3:
         dti_new = st.date_input("Data início", value=datetime.now().date(), key="os_new_dti")
         ti_new  = st.time_input("Hora início", value=datetime.now().time().replace(second=0, microsecond=0), key="os_new_ti")
@@ -98,7 +116,8 @@ with st.expander("➕ Nova Ordem de Serviço", expanded=False):
     cA, _ = st.columns([1, 5])
     with cA:
         if st.button("💾 Salvar nova OS", type="primary", use_container_width=True, key="os_btn_save_new"):
-            if not MAQ_OPTS or not st.session_state.get("os_new_tipo"):
+            maquina_escolhida = st.session_state.get("os_new_maquina") or st.session_state.get("os_new_maquina_empty")
+            if not maquina_escolhida or not st.session_state.get("os_new_tipo"):
                 st.error("Selecione a máquina e informe o tipo de serviço.")
             else:
                 dt_ini = datetime.combine(st.session_state["os_new_dti"], st.session_state["os_new_ti"])
@@ -107,7 +126,7 @@ with st.expander("➕ Nova Ordem de Serviço", expanded=False):
                     st.error("Hora fim não pode ser menor que hora início.")
                 else:
                     payload = {
-                        "id_maquina": int(name2maqid.get(st.session_state["os_new_maquina"])) if st.session_state["os_new_maquina"] else None,
+                        "id_maquina": int(name2maqid.get(maquina_escolhida)) if maquina_escolhida else None,
                         "id_funcionario": (None if st.session_state["os_new_resp"] in ("—", "", None) else int(name2funcid.get(st.session_state["os_new_resp"]))),
                         "tipo_de_servico": st.session_state["os_new_tipo"],
                         "local_do_problema": st.session_state["os_new_local"],
@@ -124,12 +143,10 @@ with st.expander("➕ Nova Ordem de Serviço", expanded=False):
 
 
 # ======================================================================
-# 2) FORMULÁRIO — EDITAR OS (Selectbox + injeção no session_state)
+# 2) FORMULÁRIO — EDITAR OS (Selectbox + injeção _prefill)
 # ======================================================================
 with st.expander("✏️ Editar Ordem de Serviço", expanded=False):
 
-
-    # Opções (200 mais recentes)
     sql_sel = """
         SELECT os.id, m.nome AS maquina, os.tipo_de_servico, os.datahora_inicio
         FROM ordens_servico os
@@ -142,11 +159,13 @@ with st.expander("✏️ Editar Ordem de Serviço", expanded=False):
     if df_sel.empty:
         st.info("Não há ordens para editar.")
         sel_id_quick = None
+        st.session_state["os_edit_id"] = None
+        st.session_state["os_ed_loaded_for"] = None
     else:
         opt_values = df_sel["id"].astype(int).tolist()
         opt_labels = df_sel.apply(
             lambda r: f"#{int(r['id'])} • {r['maquina']} • {r['tipo_de_servico']} • "
-                    f"{pd.to_datetime(r['datahora_inicio']).strftime('%d/%m %H:%M') if pd.notna(r['datahora_inicio']) else ''}",
+                    f"{pd.to_datetime(r['datahora_inicio'], errors='coerce').strftime('%d/%m %H:%M') if pd.notna(pd.to_datetime(r['datahora_inicio'], errors='coerce')) else ''}",
             axis=1
         ).tolist()
 
@@ -162,23 +181,23 @@ with st.expander("✏️ Editar Ordem de Serviço", expanded=False):
             key="os_quick_select",
         )
 
-        # Se mudou o ID, injeta valores no session_state
         if sel_id_quick and st.session_state.get("os_ed_loaded_for") != int(sel_id_quick):
             rec = _load_os_record(engine, int(sel_id_quick))
             if rec:
                 st.session_state["os_edit_id"] = int(sel_id_quick)
                 _inject_edit_state(rec, id2maqname, id2funcname)
+                _apply_os_prefill_to_widgets()
                 st.session_state["os_ed_loaded_for"] = int(sel_id_quick)
 
-        # Primeiro carregamento (se necessário)
         if st.session_state.get("os_ed_loaded_for") is None and sel_id_quick:
             rec = _load_os_record(engine, int(sel_id_quick))
             if rec:
                 st.session_state["os_edit_id"] = int(sel_id_quick)
                 _inject_edit_state(rec, id2maqname, id2funcname)
+                _apply_os_prefill_to_widgets()
                 st.session_state["os_ed_loaded_for"] = int(sel_id_quick)
 
-    # Formulário de edição (usa session_state)
+    # Formulário de edição usando _prefill_*
     rec_ok = st.session_state.get("os_ed_loaded_for") is not None
     if not rec_ok:
         st.warning("Selecione uma OS para carregar os campos de edição.")
@@ -187,7 +206,7 @@ with st.expander("✏️ Editar Ordem de Serviço", expanded=False):
         with col1e:
             if MAQ_OPTS:
                 try:
-                    idx_maq = MAQ_OPTS.index(st.session_state.get("os_ed_maquina_name", "")) if st.session_state.get("os_ed_maquina_name", "") in MAQ_OPTS else 0
+                    idx_maq = MAQ_OPTS.index(st.session_state.get("_prefill_os_maquina_name", "")) if st.session_state.get("_prefill_os_maquina_name", "") in MAQ_OPTS else 0
                 except Exception:
                     idx_maq = 0
                 nome_maquina_ed = st.selectbox("Máquina", MAQ_OPTS, index=idx_maq, key="os_ed_maquina_name")
@@ -196,27 +215,27 @@ with st.expander("✏️ Editar Ordem de Serviço", expanded=False):
 
             resp_opts_ed = ["—"] + FUNC_OPTS
             try:
-                idx_resp = resp_opts_ed.index(st.session_state.get("os_ed_resp_name", "—")) if st.session_state.get("os_ed_resp_name", "—") in resp_opts_ed else 0
+                idx_resp = resp_opts_ed.index(st.session_state.get("_prefill_os_resp_name", "—")) if st.session_state.get("_prefill_os_resp_name", "—") in resp_opts_ed else 0
             except Exception:
                 idx_resp = 0
             nome_func_ed = st.selectbox("Responsável (opcional)", resp_opts_ed, index=idx_resp, key="os_ed_resp_name")
 
-            tipo_ed = st.text_input("Tipo de serviço", value=st.session_state.get("os_ed_tipo", ""), key="os_ed_tipo")
+            tipo_ed = st.text_input("Tipo de serviço", value=st.session_state.get("_prefill_os_tipo", ""), key="os_ed_tipo")
 
         with col2e:
-            local_ed = st.text_input("Local do problema", value=st.session_state.get("os_ed_local", ""), key="os_ed_local")
-            desc_ed  = st.text_area("Descrição do problema", value=st.session_state.get("os_ed_desc", ""), key="os_ed_desc")
+            local_ed = st.text_input("Local do problema", value=st.session_state.get("_prefill_os_local", ""), key="os_ed_local")
+            desc_ed  = st.text_area("Descrição do problema", value=st.session_state.get("_prefill_os_desc", ""), key="os_ed_desc")
 
         with col3e:
-            dti_ed = st.date_input("Data início", value=st.session_state.get("os_ed_dti", datetime.now().date()), key="os_ed_dti")
-            ti_ed  = st.time_input("Hora início", value=st.session_state.get("os_ed_ti", datetime.now().time().replace(second=0, microsecond=0)), key="os_ed_ti")
-            dtf_ed = st.date_input("Data fim", value=st.session_state.get("os_ed_dtf", datetime.now().date()), key="os_ed_dtf")
-            tf_ed  = st.time_input("Hora fim", value=st.session_state.get("os_ed_tf", datetime.now().time().replace(second=0, microsecond=0)), key="os_ed_tf")
-            concluido_ed = st.number_input("Concluído (0/1)", 0, 1, int(st.session_state.get("os_ed_concluido", 0)), 1, key="os_ed_concluido")
-            obs_ed = st.text_area("Observação", value=st.session_state.get("os_ed_obs", ""), key="os_ed_obs")
+            dti_ed = st.date_input("Data início", value=st.session_state.get("_prefill_os_dti", datetime.now().date()), key="os_ed_dti")
+            ti_ed  = st.time_input("Hora início", value=st.session_state.get("_prefill_os_ti", datetime.now().time().replace(second=0, microsecond=0)), key="os_ed_ti")
+            dtf_ed = st.date_input("Data fim", value=st.session_state.get("_prefill_os_dtf", datetime.now().date()), key="os_ed_dtf")
+            tf_ed  = st.time_input("Hora fim", value=st.session_state.get("_prefill_os_tf", datetime.now().time().replace(second=0, microsecond=0)), key="os_ed_tf")
+            concluido_ed = st.number_input("Concluído (0/1)", 0, 1, int(st.session_state.get("_prefill_os_concluido", 0)), 1, key="os_ed_concluido")
+            obs_ed = st.text_area("Observação", value=st.session_state.get("_prefill_os_obs", ""), key="os_ed_obs")
 
-        cE, _ = st.columns([1, 5])
-        with cE:
+        cE1, cE2 = st.columns([1, 1])
+        with cE1:
             if st.button("💾 Salvar edições", type="primary", use_container_width=True, key="os_btn_save_edit"):
                 dt_ini = datetime.combine(st.session_state["os_ed_dti"], st.session_state["os_ed_ti"])
                 dt_fim = datetime.combine(st.session_state["os_ed_dtf"], st.session_state["os_ed_tf"])
@@ -240,17 +259,31 @@ with st.expander("✏️ Editar Ordem de Serviço", expanded=False):
                     if rec:
                         _inject_edit_state(rec, id2maqname, id2funcname)
                     st.success("OS alterada com sucesso!")
+        with cE2:
+            if st.button("🗑️ Excluir OS", type="secondary", use_container_width=True, key="os_btn_delete"):
+                delete_by_ids(engine, T, [int(st.session_state["os_edit_id"])])
+                st.success(f"OS #{int(st.session_state['os_edit_id'])} excluída.")
+                # limpa estado e recarrega
+                st.session_state["os_edit_id"] = None
+                st.session_state["os_ed_loaded_for"] = None
+                st.rerun()
 
 # ======================================================================
 # 2.1) MÃO DE OBRA — abaixo do formulário de edição (com edição/exclusão por linha)
 # ======================================================================
 
 with st.expander("🧑‍🔧 Mão de Obra da OS selecionada", expanded=False):
+
     os_id_ref = st.session_state.get("os_edit_id")
+    try:
+        os_id_ref = int(os_id_ref) if os_id_ref is not None else None
+    except (TypeError, ValueError):
+        os_id_ref = None
+
     if not os_id_ref:
         st.info("Selecione uma OS no seletor acima para lançar mão de obra.")
     else:
-        st.caption(f"OS selecionada: **#{int(os_id_ref)}**")
+        st.caption(f"OS selecionada: **#{os_id_ref}**")
 
         # --- Formulário de inserção de MO ---
         with st.form("form_mo_os_inline"):
@@ -263,7 +296,7 @@ with st.expander("🧑‍🔧 Mão de Obra da OS selecionada", expanded=False):
                 hi_mo   = st.time_input("Hora início", value=time(8, 0, 0), key="moos_hi")
                 hf_mo   = st.time_input("Hora fim",    value=time(12, 0, 0), key="moos_hf")
             with colm3:
-                st.write("")  # espaçador
+                st.write("")
                 st.write("")
                 submitted = st.form_submit_button("➕ Inserir apontamento", type="primary", use_container_width=True)
 
@@ -283,7 +316,7 @@ with st.expander("🧑‍🔧 Mão de Obra da OS selecionada", expanded=False):
                     st.success("Apontamento inserido!")
                     st.rerun()
 
-    # --- Listagem de MOs da OS selecionada (com edição/exclusão) ---
+    # --- Listagem de MOs da OS (com edição/exclusão) ---
     st.markdown("### Apontamentos lançados")
     sql_mo = """
         SELECT mo.id, mo.id_funcionario, f.nome AS funcionario, mo.data, mo.hora_inicio, mo.hora_fim
@@ -299,8 +332,6 @@ with st.expander("🧑‍🔧 Mão de Obra da OS selecionada", expanded=False):
         for _, row in df_mo.iterrows():
             mo_id = int(row["id"])
             func_nome_row = str(row["funcionario"])
-
-            # Índices seguros para selects
             idx_func = FUNC_OPTS.index(func_nome_row) if func_nome_row in FUNC_OPTS else 0
 
             with st.expander(f"MO #{mo_id} • {func_nome_row} • {row['data']} • {str(row['hora_inicio'])}–{str(row['hora_fim'])}", expanded=False):

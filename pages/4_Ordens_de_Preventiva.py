@@ -31,25 +31,38 @@ def _load_prev_record(engine, prev_id: int):
     return None if df.empty else df.iloc[0].to_dict()
 
 def _inject_edit_state_prev(rec, id2maqname, id2funcname):
-    """
-    Injeta valores no session_state ANTES de desenhar os widgets de edição.
-    """
-    st.session_state["prev_ed_maquina_name"] = id2maqname.get(int(rec["id_maquina"]), "") if rec.get("id_maquina") else ""
-    st.session_state["prev_ed_resp_name"]    = id2funcname.get(int(rec["id_funcionario"]), "—") if rec.get("id_funcionario") else "—"
+    """Armazena valores do BD em _prefill_* (sem sobrescrever keys de widgets)."""
+    st.session_state["_prefill_prev_maquina_name"] = id2maqname.get(int(rec["id_maquina"]), "") if rec.get("id_maquina") else ""
+    st.session_state["_prefill_prev_resp_name"]    = id2funcname.get(int(rec["id_funcionario"]), "—") if rec.get("id_funcionario") else "—"
+    st.session_state["_prefill_prev_servico"] = str(rec.get("servico_realizado") or "")
+    st.session_state["_prefill_prev_status"]  = str(rec.get("status") or "Aberta")
+    st.session_state["_prefill_prev_dti"] = _as_date(rec.get("datahora_inicio"))
+    st.session_state["_prefill_prev_ti"]  = _as_time(rec.get("datahora_inicio"))
+    st.session_state["_prefill_prev_dtf"] = _as_date(rec.get("datahora_fim"))
+    st.session_state["_prefill_prev_tf"]  = _as_time(rec.get("datahora_fim"))
 
-    st.session_state["prev_ed_servico"] = str(rec.get("servico_realizado") or "")
-    st.session_state["prev_ed_status"]  = str(rec.get("status") or "Aberta")
-
-    st.session_state["prev_ed_dti"] = _as_date(rec.get("datahora_inicio"))
-    st.session_state["prev_ed_ti"]  = _as_time(rec.get("datahora_inicio"))
-    st.session_state["prev_ed_dtf"] = _as_date(rec.get("datahora_fim"))
-    st.session_state["prev_ed_tf"]  = _as_time(rec.get("datahora_fim"))
+def _apply_prev_prefill_to_widgets():
+    """Copia _prefill_* para as keys dos widgets antes de renderizá-los."""
+    ss = st.session_state
+    map_simple = {
+        "prev_ed_maquina_name": "_prefill_prev_maquina_name",
+        "prev_ed_resp_name": "_prefill_prev_resp_name",
+        "prev_ed_servico": "_prefill_prev_servico",
+        "prev_ed_status": "_prefill_prev_status",
+        "prev_ed_dti": "_prefill_prev_dti",
+        "prev_ed_ti": "_prefill_prev_ti",
+        "prev_ed_dtf": "_prefill_prev_dtf",
+        "prev_ed_tf": "_prefill_prev_tf",
+    }
+    for widget_key, prefill_key in map_simple.items():
+        if prefill_key in ss:
+            ss[widget_key] = ss[prefill_key]
 
 # ----------------- Setup -----------------
 st.title("🧾 Ordens de Preventiva")
 engine = get_engine()
-T = TABLES["prev"]       # ordens_preventiva
-T_MO = TABLES["mo_prev"] # mao_obra_preventiva
+T = TABLES["prev"]
+T_MO = TABLES["mo_prev"]
 
 maqs  = options_maquinas(engine)
 funcs = options_funcionarios(engine)
@@ -93,11 +106,10 @@ with st.expander("➕ Nova Preventiva", expanded=False):
     cA, _ = st.columns([1, 5])
     with cA:
         if st.button("💾 Salvar nova Preventiva", type="primary", use_container_width=True, key="prev_btn_save_new"):
-            if not MAQ_OPTS and not st.session_state.get("prev_new_maquina_empty"):
+            maquina_escolhida = st.session_state.get("prev_new_maquina") or st.session_state.get("prev_new_maquina_empty")
+            if not maquina_escolhida:
                 st.error("Cadastre máquinas antes de criar Preventivas.")
             else:
-                # pega a escolha correta de máquina (um dos dois widgets)
-                maquina_escolhida = st.session_state.get("prev_new_maquina") or st.session_state.get("prev_new_maquina_empty")
                 dt_ini = datetime.combine(st.session_state["prev_new_dti"], st.session_state["prev_new_ti"])
                 dt_fim = datetime.combine(st.session_state["prev_new_dtf"], st.session_state["prev_new_tf"])
                 if dt_fim < dt_ini:
@@ -109,7 +121,7 @@ with st.expander("➕ Nova Preventiva", expanded=False):
                         "datahora_inicio": dt_ini,
                         "datahora_fim": dt_fim,
                         "servico_realizado": st.session_state["prev_new_servico"],
-                        "status": st.session_state["prev_new_status"] or "Aberta",
+                        "status": (st.session_state["prev_new_status"] or "Aberta"),
                     }
                     insert_row(engine, T, payload)
                     st.success("Preventiva inserida!")
@@ -122,7 +134,6 @@ with st.expander("➕ Nova Preventiva", expanded=False):
 # ======================================================================
 with st.expander("✏️ Editar Preventiva", expanded=False):
 
-    # Monta opções (200 mais recentes)
     sql_sel = """
         SELECT p.id, m.nome AS maquina, p.datahora_inicio
         FROM ordens_preventiva p
@@ -135,15 +146,13 @@ with st.expander("✏️ Editar Preventiva", expanded=False):
     if df_sel.empty:
         st.info("Não há preventivas para editar.")
         sel_id_quick = None
-        # zera estados de edição para evitar IDs antigos/None inconsistentes
         st.session_state["prev_edit_id"] = None
         st.session_state["prev_ed_loaded_for"] = None
-
     else:
         opt_values = df_sel["id"].astype(int).tolist()
         opt_labels = df_sel.apply(
             lambda r: f"#{int(r['id'])} • {r['maquina']} • "
-                    f"{pd.to_datetime(r['datahora_inicio']).strftime('%d/%m %H:%M') if pd.notna(r['datahora_inicio']) else ''}",
+                    f"{pd.to_datetime(r['datahora_inicio'], errors='coerce').strftime('%d/%m %H:%M') if pd.notna(pd.to_datetime(r['datahora_inicio'], errors='coerce')) else ''}",
             axis=1
         ).tolist()
 
@@ -159,23 +168,23 @@ with st.expander("✏️ Editar Preventiva", expanded=False):
             key="prev_quick_select",
         )
 
-        # Se mudou o ID, injeta valores no session_state
         if sel_id_quick and st.session_state.get("prev_ed_loaded_for") != int(sel_id_quick):
             rec = _load_prev_record(engine, int(sel_id_quick))
             if rec:
                 st.session_state["prev_edit_id"] = int(sel_id_quick)
                 _inject_edit_state_prev(rec, id2maqname, id2funcname)
+                _apply_prev_prefill_to_widgets()
                 st.session_state["prev_ed_loaded_for"] = int(sel_id_quick)
 
-        # Primeiro carregamento (se necessário)
         if st.session_state.get("prev_ed_loaded_for") is None and sel_id_quick:
             rec = _load_prev_record(engine, int(sel_id_quick))
             if rec:
                 st.session_state["prev_edit_id"] = int(sel_id_quick)
                 _inject_edit_state_prev(rec, id2maqname, id2funcname)
+                _apply_prev_prefill_to_widgets()
                 st.session_state["prev_ed_loaded_for"] = int(sel_id_quick)
 
-    # Formulário de edição (usa session_state)
+    # Formulário de edição com _prefill_*
     rec_ok = st.session_state.get("prev_ed_loaded_for") is not None
     if not rec_ok:
         st.warning("Selecione uma preventiva para carregar os campos de edição.")
@@ -184,7 +193,7 @@ with st.expander("✏️ Editar Preventiva", expanded=False):
         with col1e:
             if MAQ_OPTS:
                 try:
-                    idx_maq = MAQ_OPTS.index(st.session_state.get("prev_ed_maquina_name", "")) if st.session_state.get("prev_ed_maquina_name", "") in MAQ_OPTS else 0
+                    idx_maq = MAQ_OPTS.index(st.session_state.get("_prefill_prev_maquina_name", "")) if st.session_state.get("_prefill_prev_maquina_name", "") in MAQ_OPTS else 0
                 except Exception:
                     idx_maq = 0
                 nome_maquina_ed = st.selectbox("Máquina", MAQ_OPTS, index=idx_maq, key="prev_ed_maquina_name")
@@ -193,30 +202,29 @@ with st.expander("✏️ Editar Preventiva", expanded=False):
 
             resp_opts_ed = ["—"] + FUNC_OPTS
             try:
-                idx_resp = resp_opts_ed.index(st.session_state.get("prev_ed_resp_name", "—")) if st.session_state.get("prev_ed_resp_name", "—") in resp_opts_ed else 0
+                idx_resp = resp_opts_ed.index(st.session_state.get("_prefill_prev_resp_name", "—")) if st.session_state.get("_prefill_prev_resp_name", "—") in resp_opts_ed else 0
             except Exception:
                 idx_resp = 0
             nome_func_ed = st.selectbox("Responsável (opcional)", resp_opts_ed, index=idx_resp, key="prev_ed_resp_name")
 
         with col2e:
-            dti_ed = st.date_input("Data início", value=st.session_state.get("prev_ed_dti", datetime.now().date()), key="prev_ed_dti")
-            ti_ed  = st.time_input("Hora início", value=st.session_state.get("prev_ed_ti", datetime.now().time().replace(second=0, microsecond=0)), key="prev_ed_ti")
-            dtf_ed = st.date_input("Data fim", value=st.session_state.get("prev_ed_dtf", datetime.now().date()), key="prev_ed_dtf")
-            tf_ed  = st.time_input("Hora fim", value=st.session_state.get("prev_ed_tf", datetime.now().time().replace(second=0, microsecond=0)), key="prev_ed_tf")
+            dti_ed = st.date_input("Data início", value=st.session_state.get("_prefill_prev_dti", datetime.now().date()), key="prev_ed_dti")
+            ti_ed  = st.time_input("Hora início", value=st.session_state.get("_prefill_prev_ti", datetime.now().time().replace(second=0, microsecond=0)), key="prev_ed_ti")
+            dtf_ed = st.date_input("Data fim", value=st.session_state.get("_prefill_prev_dtf", datetime.now().date()), key="prev_ed_dtf")
+            tf_ed  = st.time_input("Hora fim", value=st.session_state.get("_prefill_prev_tf", datetime.now().time().replace(second=0, microsecond=0)), key="prev_ed_tf")
 
         with col3e:
-            servico_ed = st.text_area("Serviço realizado", value=st.session_state.get("prev_ed_servico", ""), key="prev_ed_servico")
-            status_ed  = st.text_input("Status", value=st.session_state.get("prev_ed_status", "Aberta"), key="prev_ed_status")
+            servico_ed = st.text_area("Serviço realizado", value=st.session_state.get("_prefill_prev_servico", ""), key="prev_ed_servico")
+            status_ed  = st.text_input("Status", value=st.session_state.get("_prefill_prev_status", "Aberta"), key="prev_ed_status")
 
-        cE, _ = st.columns([1, 5])
-        with cE:
+        cE1, cE2 = st.columns([1, 1])
+        with cE1:
             if st.button("💾 Salvar edições", type="primary", use_container_width=True, key="prev_btn_save_edit"):
                 dt_ini = datetime.combine(st.session_state["prev_ed_dti"], st.session_state["prev_ed_ti"])
                 dt_fim = datetime.combine(st.session_state["prev_ed_dtf"], st.session_state["prev_ed_tf"])
                 if dt_fim < dt_ini:
                     st.error("Hora fim não pode ser menor que hora início.")
                 else:
-                    # pega máquina da edição (considera o widget vazio quando não há opções)
                     maquina_ed = st.session_state.get("prev_ed_maquina_name") or st.session_state.get("prev_ed_maquina_name_empty")
                     payload = {
                         "id": int(st.session_state["prev_edit_id"]),
@@ -225,29 +233,33 @@ with st.expander("✏️ Editar Preventiva", expanded=False):
                         "datahora_inicio": dt_ini,
                         "datahora_fim": dt_fim,
                         "servico_realizado": st.session_state["prev_ed_servico"],
-                        "status": st.session_state["prev_ed_status"] or "Aberta",
+                        "status": (st.session_state["prev_ed_status"] or "Aberta"),
                     }
                     update_row(engine, T, "id", payload)
-                    # Recarrega e reinjeta para manter sincronizado
                     rec = _load_prev_record(engine, int(st.session_state["prev_edit_id"]))
                     if rec:
                         _inject_edit_state_prev(rec, id2maqname, id2funcname)
                     st.success("Preventiva alterada com sucesso!")
+        with cE2:
+            if st.button("🗑️ Excluir Preventiva", type="secondary", use_container_width=True, key="prev_btn_delete"):
+                delete_by_ids(engine, T, [int(st.session_state["prev_edit_id"])])
+                st.success(f"Preventiva #{int(st.session_state['prev_edit_id'])} excluída.")
+                st.session_state["prev_edit_id"] = None
+                st.session_state["prev_ed_loaded_for"] = None
+                st.rerun()
 
 # ======================================================================
 # 2.1) MÃO DE OBRA — abaixo do formulário de edição (com edição/exclusão)
 # ======================================================================
-
 with st.expander("🧑‍🔧 Mão de Obra da Preventiva selecionada", expanded=False):
 
-    # pega e valida o ID selecionado
-    prev_id_raw = st.session_state.get("prev_edit_id", None)
+    prev_id_ref = st.session_state.get("prev_edit_id")
     try:
-        prev_id_ref = int(prev_id_raw) if prev_id_raw is not None else None
+        prev_id_ref = int(prev_id_ref) if prev_id_ref is not None else None
     except (TypeError, ValueError):
         prev_id_ref = None
 
-    if prev_id_ref is None:
+    if not prev_id_ref:
         st.info("Selecione uma Preventiva no seletor acima para lançar mão de obra.")
     else:
         st.caption(f"Preventiva selecionada: **#{prev_id_ref}**")
@@ -283,57 +295,55 @@ with st.expander("🧑‍🔧 Mão de Obra da Preventiva selecionada", expanded=
                     st.success("Apontamento inserido!")
                     st.rerun()
 
-    # --- Listagem de MOs da Preventiva selecionada (com edição/exclusão) ---
-    st.markdown("### Apontamentos lançados")
-    sql_mo = """
-        SELECT mo.id, mo.id_funcionario, f.nome AS funcionario, mo.data, mo.hora_inicio, mo.hora_fim
-        FROM mao_obra_preventiva mo
-        JOIN funcionarios f ON f.id = mo.id_funcionario
-        WHERE mo.id_ordem_preventiva = :id
-        ORDER BY mo.data ASC, mo.hora_inicio ASC
-    """
-    df_mo = fetch_df(engine, sql_mo, {"id": prev_id_ref})
-    if df_mo.empty:
-        st.info("Nenhum apontamento para esta Preventiva.")
-    else:
-        for _, row in df_mo.iterrows():
-            mo_id = int(row["id"])
-            func_nome_row = str(row["funcionario"])
-            idx_func = FUNC_OPTS.index(func_nome_row) if func_nome_row in FUNC_OPTS else 0
+        # --- Listagem de MOs da Preventiva (com edição/exclusão) ---
+        st.markdown("### Apontamentos lançados")
+        sql_mo = """
+            SELECT mo.id, mo.id_funcionario, f.nome AS funcionario, mo.data, mo.hora_inicio, mo.hora_fim
+            FROM mao_obra_preventiva mo
+            JOIN funcionarios f ON f.id = mo.id_funcionario
+            WHERE mo.id_ordem_preventiva = :id
+            ORDER BY mo.data ASC, mo.hora_inicio ASC
+        """
+        df_mo = fetch_df(engine, sql_mo, {"id": int(prev_id_ref)})
+        if df_mo.empty:
+            st.info("Nenhum apontamento para esta Preventiva.")
+        else:
+            for _, row in df_mo.iterrows():
+                mo_id = int(row["id"])
+                func_nome_row = str(row["funcionario"])
+                idx_func = FUNC_OPTS.index(func_nome_row) if func_nome_row in FUNC_OPTS else 0
 
-            with st.expander(f"MO #{mo_id} • {func_nome_row} • {row['data']} • {str(row['hora_inicio'])}–{str(row['hora_fim'])}", expanded=False):
-                c1, c2, c3, c4 = st.columns(4)
-                with c1:
-                    novo_func = st.selectbox("Funcionário", FUNC_OPTS, index=idx_func, key=f"moprev_edit_func_{mo_id}")
-                with c2:
-                    nova_data = st.date_input("Data", value=pd.to_datetime(str(row["data"])).date(), key=f"moprev_edit_data_{mo_id}")
-                with c3:
-                    novo_hi = st.time_input("Hora início", value=_as_time(row["hora_inicio"]), key=f"moprev_edit_hi_{mo_id}")
-                with c4:
-                    novo_hf = st.time_input("Hora fim", value=_as_time(row["hora_fim"]), key=f"moprev_edit_hf_{mo_id}")
+                with st.expander(f"MO #{mo_id} • {func_nome_row} • {row['data']} • {str(row['hora_inicio'])}–{str(row['hora_fim'])}", expanded=False):
+                    c1, c2, c3, c4 = st.columns(4)
+                    with c1:
+                        novo_func = st.selectbox("Funcionário", FUNC_OPTS, index=idx_func, key=f"moprev_edit_func_{mo_id}")
+                    with c2:
+                        nova_data = st.date_input("Data", value=pd.to_datetime(str(row["data"])).date(), key=f"moprev_edit_data_{mo_id}")
+                    with c3:
+                        novo_hi = st.time_input("Hora início", value=_as_time(row["hora_inicio"]), key=f"moprev_edit_hi_{mo_id}")
+                    with c4:
+                        novo_hf = st.time_input("Hora fim", value=_as_time(row["hora_fim"]), key=f"moprev_edit_hf_{mo_id}")
 
-                cA, cB = st.columns(2)
-                with cA:
-                    if st.button("💾 Salvar", key=f"moprev_btn_save_{mo_id}", use_container_width=True):
-                        if novo_hf < novo_hi:
-                            st.error("Hora fim não pode ser menor que hora início.")
-                        else:
-                            update_row(engine, T_MO, "id", {
-                                "id": mo_id,
-                                "id_funcionario": int(name2funcid.get(novo_func)),
-                                "data": nova_data,
-                                "hora_inicio": novo_hi,
-                                "hora_fim": novo_hf
-                            })
-                            st.success("Apontamento atualizado.")
+                    cA, cB = st.columns(2)
+                    with cA:
+                        if st.button("💾 Salvar", key=f"moprev_btn_save_{mo_id}", use_container_width=True):
+                            if novo_hf < novo_hi:
+                                st.error("Hora fim não pode ser menor que hora início.")
+                            else:
+                                update_row(engine, T_MO, "id", {
+                                    "id": mo_id,
+                                    "id_funcionario": int(name2funcid.get(novo_func)),
+                                    "data": nova_data,
+                                    "hora_inicio": novo_hi,
+                                    "hora_fim": novo_hf
+                                })
+                                st.success("Apontamento atualizado.")
+                                st.rerun()
+                    with cB:
+                        if st.button("🗑️ Excluir", key=f"moprev_btn_del_{mo_id}", use_container_width=True):
+                            delete_by_ids(engine, T_MO, [mo_id])
+                            st.success("Apontamento excluído.")
                             st.rerun()
-                with cB:
-                    if st.button("🗑️ Excluir", key=f"moprev_btn_del_{mo_id}", use_container_width=True):
-                        delete_by_ids(engine, T_MO, [mo_id])
-                        st.success("Apontamento excluído.")
-                        st.rerun()
-
-
 
 # =========================================
 # 3) FILTROS (para a listagem)
