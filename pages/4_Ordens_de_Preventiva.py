@@ -292,58 +292,58 @@ with st.expander("🧑‍🔧 Mão de Obra da Preventiva selecionada", expanded=
                         "hora_inicio": hi_mo,
                         "hora_fim": hf_mo
                     })
-                    st.success("Apontamento inserido!")
+                    st.success("MO inserida!")
                     st.rerun()
 
         # --- Listagem de MOs da Preventiva (com edição/exclusão) ---
-        st.markdown("### Apontamentos lançados")
-        sql_mo = """
-            SELECT mo.id, mo.id_funcionario, f.nome AS funcionario, mo.data, mo.hora_inicio, mo.hora_fim
-            FROM mao_obra_preventiva mo
-            JOIN funcionarios f ON f.id = mo.id_funcionario
-            WHERE mo.id_ordem_preventiva = :id
-            ORDER BY mo.data ASC, mo.hora_inicio ASC
-        """
-        df_mo = fetch_df(engine, sql_mo, {"id": int(prev_id_ref)})
-        if df_mo.empty:
-            st.info("Nenhum apontamento para esta Preventiva.")
-        else:
-            for _, row in df_mo.iterrows():
-                mo_id = int(row["id"])
-                func_nome_row = str(row["funcionario"])
-                idx_func = FUNC_OPTS.index(func_nome_row) if func_nome_row in FUNC_OPTS else 0
+with st.expander("🧑‍🔧🧑‍🔧 Mão de Obra Lançada", expanded=False):
+    sql_mo = """
+        SELECT mo.id, mo.id_funcionario, f.nome AS funcionario, mo.data, mo.hora_inicio, mo.hora_fim
+        FROM mao_obra_preventiva mo
+        JOIN funcionarios f ON f.id = mo.id_funcionario
+        WHERE mo.id_ordem_preventiva = :id
+        ORDER BY mo.data ASC, mo.hora_inicio ASC
+    """
+    df_mo = fetch_df(engine, sql_mo, {"id": int(prev_id_ref)})
+    if df_mo.empty:
+        st.info("Nenhum apontamento para esta Preventiva.")
+    else:
+        for _, row in df_mo.iterrows():
+            mo_id = int(row["id"])
+            func_nome_row = str(row["funcionario"])
+            idx_func = FUNC_OPTS.index(func_nome_row) if func_nome_row in FUNC_OPTS else 0
 
-                with st.expander(f"MO #{mo_id} • {func_nome_row} • {row['data']} • {str(row['hora_inicio'])}–{str(row['hora_fim'])}", expanded=False):
-                    c1, c2, c3, c4 = st.columns(4)
-                    with c1:
-                        novo_func = st.selectbox("Funcionário", FUNC_OPTS, index=idx_func, key=f"moprev_edit_func_{mo_id}")
-                    with c2:
-                        nova_data = st.date_input("Data", value=pd.to_datetime(str(row["data"])).date(), key=f"moprev_edit_data_{mo_id}")
-                    with c3:
-                        novo_hi = st.time_input("Hora início", value=_as_time(row["hora_inicio"]), key=f"moprev_edit_hi_{mo_id}")
-                    with c4:
-                        novo_hf = st.time_input("Hora fim", value=_as_time(row["hora_fim"]), key=f"moprev_edit_hf_{mo_id}")
+            with st.expander(f"MO #{mo_id} • {func_nome_row} • {row['data']} • {str(row['hora_inicio'])}–{str(row['hora_fim'])}", expanded=False):
+                c1, c2, c3, c4 = st.columns(4)
+                with c1:
+                    novo_func = st.selectbox("Funcionário", FUNC_OPTS, index=idx_func, key=f"moprev_edit_func_{mo_id}")
+                with c2:
+                    nova_data = st.date_input("Data", value=pd.to_datetime(str(row["data"])).date(), key=f"moprev_edit_data_{mo_id}")
+                with c3:
+                    novo_hi = st.time_input("Hora início", value=_as_time(row["hora_inicio"]), key=f"moprev_edit_hi_{mo_id}")
+                with c4:
+                    novo_hf = st.time_input("Hora fim", value=_as_time(row["hora_fim"]), key=f"moprev_edit_hf_{mo_id}")
 
-                    cA, cB = st.columns(2)
-                    with cA:
-                        if st.button("💾 Salvar", key=f"moprev_btn_save_{mo_id}", use_container_width=True):
-                            if novo_hf < novo_hi:
-                                st.error("Hora fim não pode ser menor que hora início.")
-                            else:
-                                update_row(engine, T_MO, "id", {
-                                    "id": mo_id,
-                                    "id_funcionario": int(name2funcid.get(novo_func)),
-                                    "data": nova_data,
-                                    "hora_inicio": novo_hi,
-                                    "hora_fim": novo_hf
-                                })
-                                st.success("Apontamento atualizado.")
-                                st.rerun()
-                    with cB:
-                        if st.button("🗑️ Excluir", key=f"moprev_btn_del_{mo_id}", use_container_width=True):
-                            delete_by_ids(engine, T_MO, [mo_id])
-                            st.success("Apontamento excluído.")
+                cA, cB = st.columns(2)
+                with cA:
+                    if st.button("💾 Salvar", key=f"moprev_btn_save_{mo_id}", use_container_width=True):
+                        if novo_hf < novo_hi:
+                            st.error("Hora fim não pode ser menor que hora início.")
+                        else:
+                            update_row(engine, T_MO, "id", {
+                                "id": mo_id,
+                                "id_funcionario": int(name2funcid.get(novo_func)),
+                                "data": nova_data,
+                                "hora_inicio": novo_hi,
+                                "hora_fim": novo_hf
+                            })
+                            st.success("Apontamento atualizado.")
                             st.rerun()
+                with cB:
+                    if st.button("🗑️ Excluir", key=f"moprev_btn_del_{mo_id}", use_container_width=True):
+                        delete_by_ids(engine, T_MO, [mo_id])
+                        st.success("Apontamento excluído.")
+                        st.rerun()
 
 # =========================================
 # 3) FILTROS (para a listagem)

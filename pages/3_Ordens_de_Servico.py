@@ -313,11 +313,11 @@ with st.expander("🧑‍🔧 Mão de Obra da OS selecionada", expanded=False):
                         "hora_inicio": hi_mo,
                         "hora_fim": hf_mo
                     })
-                    st.success("Apontamento inserido!")
+                    st.success("MO inserida!")
                     st.rerun()
 
     # --- Listagem de MOs da OS (com edição/exclusão) ---
-    st.markdown("### Apontamentos lançados")
+with st.expander("🧑‍🔧🧑‍🔧 Mão de Obra Lançada", expanded=False):
     sql_mo = """
         SELECT mo.id, mo.id_funcionario, f.nome AS funcionario, mo.data, mo.hora_inicio, mo.hora_fim
         FROM mao_obra_os mo
