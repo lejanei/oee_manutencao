@@ -2,46 +2,37 @@
 import streamlit as st
 from sqlalchemy import text
 from db import get_engine
-from auth import get_authenticator, inject_role_from_authenticator, render_userbox, can
-
-# -----------------------------
-# Configuração da página
-# -----------------------------
+from auth import get_authenticator, inject_role_from_authenticator, can
 from nav import render_sidebar
 
+# --------------------------------
+# Configuração da página
+# --------------------------------
 st.set_page_config(
     page_title="Cori • Manutenção & OEE",
+    page_icon="🛠️",
     layout="wide",
-    initial_sidebar_state="expanded",  # 🔒 mantém o sidebar aberto
+    initial_sidebar_state="expanded",
 )
 
-render_sidebar()  # ← garante o sidebar persistente nesta página
+# --------------------------------
+# Autenticação (login) — UMA vez
+# --------------------------------
+authenticator = get_authenticator()
+# use uma key fixa para este arquivo (evita duplicate form)
+inject_role_from_authenticator(authenticator, key="login_main")
 
-# -----------------------------
-# Título
-# -----------------------------
+# --------------------------------
+# Sidebar customizado persistente
+# --------------------------------
+render_sidebar()  # desenha userbox + navegação (sem login aqui)
+
+# --------------------------------
+# Conteúdo principal
+# --------------------------------
 st.title("Cori • Manutenção & OEE")
 st.caption("Autenticação + Regras por papel (operador, manutentor, admin)")
 
-# -----------------------------
-# Autenticação
-# -----------------------------
-authenticator = get_authenticator()
-
-# Evita relogar duas vezes no mesmo ciclo
-if "auth_inited" not in st.session_state:
-    inject_role_from_authenticator(authenticator)
-    st.session_state["auth_inited"] = True
-
-inject_role_from_authenticator(authenticator)
-# -----------------------------
-# Navegação (condicionada por papel)
-# -----------------------------
-
-
-# -----------------------------
-# Saúde da conexão MySQL
-# -----------------------------
 st.subheader("Status de conexão")
 try:
     engine = get_engine()
@@ -51,9 +42,6 @@ try:
 except Exception as e:
     st.error(f"❌ Erro de conexão: {e}")
 
-# -----------------------------
-# Informações sobre permissões
-# -----------------------------
 st.divider()
 st.markdown(
     """
@@ -64,7 +52,6 @@ st.markdown(
 - **admin**: acesso **total**
 """
 )
-
 st.info(
     "As permissões de criar/editar/excluir são aplicadas **dentro** das páginas. "
     "Se um botão/ação não aparece para você, seu papel não permite essa operação."

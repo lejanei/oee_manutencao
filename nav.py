@@ -3,9 +3,15 @@ import streamlit as st
 from auth import get_authenticator, render_userbox, can
 
 def render_sidebar():
-    """Desenha o sidebar (userbox + navegação) em qualquer página, SEM criar novo autenticador."""
-    authenticator = get_authenticator()  # é singleton por cache_resource
-    render_userbox(authenticator)
+    # CSS kill-switch para ocultar nav multipage automática no Cloud
+    st.markdown("""
+    <style>
+    [data-testid="stSidebarNav"] { display: none !important; }
+    section[data-testid="stSidebar"] > div:has(nav[aria-label="Main navigation"]) { display:none !important; }
+    </style>""", unsafe_allow_html=True)
+
+    authenticator = get_authenticator()   # mesma instância (guardada na sessão)
+    render_userbox(authenticator)    
 
     with st.sidebar:
         st.markdown("## Navegação")

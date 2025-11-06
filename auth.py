@@ -4,10 +4,10 @@ import streamlit_authenticator as stauth
 from typing import List, Tuple, Dict, Any
 
 # ============================================================
-# UTILITÁRIO PARA COPIAR st.secrets (read-only) PARA DICT NORMAL
+# UTILITÁRIO: copiar st.secrets (read-only) para dict normal
 # ============================================================
 def _secrets_to_dict(obj):
-    """Converte objetos de st.secrets (read-only) em dicionários comuns (deep copy)."""
+    """Converte objetos de st.secrets em dicionários comuns (deep copy)."""
     try:
         items = dict(obj)
     except Exception:
@@ -18,10 +18,8 @@ def _secrets_to_dict(obj):
     return out
 
 # ============================================================
-# AUTENTICADOR STREAMLIT
+# AUTHENTICATOR — instância única por sessão (sem cache de widget)
 # ============================================================
-# auth.py (substitua apenas esta função)
-
 def get_authenticator():
     """Cria o autenticador uma única vez por sessão, sem usar cache."""
     if "_authenticator" in st.session_state:
@@ -37,22 +35,13 @@ def get_authenticator():
     st.session_state["_authenticator"] = auth
     return auth
 
-
 # ============================================================
-# FUNÇÕES DE LOGIN / LOGOUT / PERFIL  (compat com várias versões)
+# NORMALIZA retorno do login para (name, auth_status, username)
 # ============================================================
 def _normalize_login_return(ret: Any) -> Tuple[str|None, bool|None, str|None]:
-    """
-    Normaliza o retorno do authenticator.login(...) para (name, auth_status, username).
-    - Algumas versões retornam tuple(name, auth_status, username)
-    - Outras retornam dict {"name":..., "authentication_status":..., "username":...}
-    - Outras apenas None, mas preenchem st.session_state
-    - Em versões antigas pode retornar só auth_status (bool)
-    """
     # tuple clássico
     if isinstance(ret, tuple) and len(ret) == 3:
         return ret[0], ret[1], ret[2]
-
     # dict moderno
     if isinstance(ret, dict):
         return (
@@ -60,29 +49,34 @@ def _normalize_login_return(ret: Any) -> Tuple[str|None, bool|None, str|None]:
             ret.get("authentication_status"),
             ret.get("username"),
         )
-
-    # bool (raro): só status
+    # bool (raro): apenas status
     if isinstance(ret, bool):
         return (
             st.session_state.get("name"),
             ret,
             st.session_state.get("username"),
         )
-
-    # None: tentar via session_state
+    # None: tenta session_state
     return (
         st.session_state.get("name"),
         st.session_state.get("authentication_status"),
         st.session_state.get("username"),
     )
 
-def inject_role_from_authenticator(authenticator):
+# ============================================================
+# LOGIN / LOGOUT / INFO DO USUÁRIO
+# ============================================================
+def inject_role_from_authenticator(authenticator, key: str = "login_main"):
     """
-    Exibe o formulário de login (no sidebar) e injeta o papel do usuário na sessão.
-    Suporta streamlit-authenticator 0.3.x e 0.4.x (e variações).
+    Renderiza o login no sidebar UMA vez na página principal.
+    Use uma key exclusiva para evitar 'duplicate form key'.
     """
-    # nas versões novas o primeiro parâmetro é "location"
-    ret = authenticator.login(location="sidebar")
+    try:
+        ret = authenticator.login(location="sidebar", key=key, clear_on_submit=True)
+    except TypeError:
+        # fallback p/ versões antigas sem esses kwargs
+        ret = authenticator.login(location="sidebar")
+
     name, auth_status, username = _normalize_login_return(ret)
 
     if auth_status:
@@ -91,9 +85,7 @@ def inject_role_from_authenticator(authenticator):
         if name:     st.session_state["name"] = name
         # papel a partir do secrets
         if username:
-            role = (
-                st.secrets["auth"]["credentials"]["usernames"][username].get("role", "operador")
-            )
+            role = st.secrets["auth"]["credentials"]["usernames"][username].get("role", "operador")
         else:
             role = st.session_state.get("role", "operador")
         st.session_state["role"] = role
@@ -110,31 +102,28 @@ def render_userbox(authenticator):
         with st.sidebar:
             st.write(f"👤 **{st.session_state.get('name', '')}**")
             st.write(f"🔑 Papel: **{st.session_state.get('role', 'anon')}**")
-            # versões novas: logout(location=..., key=...)
+            # key única baseada no username evita duplicação entre páginas
+            logout_key = f"logout_btn_{st.session_state.get('username','anon')}"
             try:
-                authenticator.logout(location="sidebar", key="logout_btn")
+                authenticator.logout(location="sidebar", key=logout_key)
             except TypeError:
-                # fallback para assinaturas antigas
                 authenticator.logout("Sair", "sidebar")
 
 # ============================================================
-# FUNÇÕES AUXILIARES DE PERMISSÕES
+# PERMISSÕES POR PAPEL
 # ============================================================
 def current_username(): return st.session_state.get("username")
 def current_name(): return st.session_state.get("name")
 def current_role(): return st.session_state.get("role", "anon")
 def is_logged(): return st.session_state.get("authentication_status", None) is True
 
-# ============================================================
-# MATRIZ DE PERMISSÕES POR PAPEL
-# ============================================================
 ROLE_PERMS = {
     "operador": {
         "access_funcionarios": False,
         "access_maquinas": False,
         "view_os": True, "create_os": True, "edit_os": False, "delete_os": False,
         "view_prev": True, "create_prev": False, "edit_prev": False, "delete_prev": False,
-        "view_oee": True,  # só leitura nas páginas
+        "view_oee": True,
     },
     "manutentor": {
         "access_funcionarios": False,
@@ -148,7 +137,7 @@ ROLE_PERMS = {
         "access_maquinas": True,
         "view_os": True, "create_os": True, "edit_os": True, "delete_os": True,
         "view_prev": True, "create_prev": True, "edit_prev": True, "delete_prev": True,
-        "view_oee": True,"create_oee": True, "edit_oee": True, "delete_oee": True,
+        "view_oee": True,
     },
 }
 
