@@ -3,26 +3,37 @@ import pandas as pd
 from auth import gate_page
 from db import get_engine, TABLES, fetch_df, count_rows, insert_row, update_row, delete_by_ids
 
+from nav import render_sidebar
+
+st.set_page_config(
+    page_title="Cori • Manutenção & OEE",
+    layout="wide",
+    initial_sidebar_state="expanded",  # 🔒 mantém o sidebar aberto
+)
+
+render_sidebar()  # ← garante o sidebar persistente nesta página
+
+
 gate_page(["admin"])
 st.title("👥 Funcionários")
 
 engine = get_engine()
 T = TABLES["funcionarios"]
 
-st.subheader("➕ Novo funcionário")
-with st.form("form_func"):
-    nome = st.text_input("Nome", "")
-    cargo = st.text_input("Cargo", "")
-    ok = st.form_submit_button("Salvar", type="primary", use_container_width=True)
-    if ok:
-        if not nome or not cargo:
-            st.error("Preencha nome e cargo.")
-        else:
-            insert_row(engine, T, {"nome": nome, "cargo": cargo})
-            st.success("Inserido!")
-            st.rerun()
+with st.expander("➕ Novo funcionário", expanded=False):
+    with st.form("form_func"):
+        nome = st.text_input("Nome", "")
+        cargo = st.text_input("Cargo", "")
+        ok = st.form_submit_button("Salvar", type="primary", use_container_width=True)
+        if ok:
+            if not nome or not cargo:
+                st.error("Preencha nome e cargo.")
+            else:
+                insert_row(engine, T, {"nome": nome, "cargo": cargo})
+                st.success("Inserido!")
+                st.rerun()
 
-st.divider()
+
 
 page_size = st.number_input("Itens por página", 5, 200, 25, 5, key="func_page_size")
 total = count_rows(engine, T, " WHERE 1=1", {})

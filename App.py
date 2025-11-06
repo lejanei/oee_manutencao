@@ -1,29 +1,47 @@
+# App.py
 import streamlit as st
 from sqlalchemy import text
 from db import get_engine
 from auth import get_authenticator, inject_role_from_authenticator, render_userbox, can
 
-st.set_page_config(page_title="Cori • Manutenção & OEE", page_icon="🛠️", layout="wide")
+# -----------------------------
+# Configuração da página
+# -----------------------------
+from nav import render_sidebar
+
+st.set_page_config(
+    page_title="Cori • Manutenção & OEE",
+    layout="wide",
+    initial_sidebar_state="expanded",  # 🔒 mantém o sidebar aberto
+)
+
+render_sidebar()  # ← garante o sidebar persistente nesta página
+
+# -----------------------------
+# Título
+# -----------------------------
 st.title("Cori • Manutenção & OEE")
-st.caption("Autenticação + Regras por papel")
+st.caption("Autenticação + Regras por papel (operador, manutentor, admin)")
 
+# -----------------------------
 # Autenticação
+# -----------------------------
 authenticator = get_authenticator()
+
+# Evita relogar duas vezes no mesmo ciclo
+if "auth_inited" not in st.session_state:
+    inject_role_from_authenticator(authenticator)
+    st.session_state["auth_inited"] = True
+
 inject_role_from_authenticator(authenticator)
-render_userbox(authenticator)
+# -----------------------------
+# Navegação (condicionada por papel)
+# -----------------------------
 
-# Menu condicionado por papel
-with st.sidebar:
-    st.markdown("## Navegação")
-    st.page_link("app.py", label="🏠 Início", icon="🏠")
-    if can("access_funcionarios"):
-        st.page_link("pages/1_Funcionarios.py", label="👥 Funcionários", icon="👥")
-    if can("access_maquinas"):
-        st.page_link("pages/2_Maquinas.py", label="🏭 Máquinas", icon="🏭")
-    st.page_link("pages/3_Ordens_de_Servico.py", label="🧾 OS (Corretiva)", icon="🧾")
-    st.page_link("pages/4_Ordens_de_Preventiva.py", label="🧾 Preventiva", icon="🧾")
-    st.page_link("pages/5_OEE.py", label="📊 OEE", icon="📊")
 
+# -----------------------------
+# Saúde da conexão MySQL
+# -----------------------------
 st.subheader("Status de conexão")
 try:
     engine = get_engine()
@@ -33,10 +51,21 @@ try:
 except Exception as e:
     st.error(f"❌ Erro de conexão: {e}")
 
+# -----------------------------
+# Informações sobre permissões
+# -----------------------------
 st.divider()
-st.markdown("""
-**Regras:**  
-- operador: cria OS; vê listagens; sem editar/excluir; sem Funcionários/Máquinas  
-- manutentor: cria/edita OS e Preventivas; sem excluir; sem Funcionários/Máquinas  
-- admin: total
-""")
+st.markdown(
+    """
+**Regras de acesso:**
+
+- **operador**: cria OS; vê listagens; **sem** editar/excluir; **sem** acesso a **Funcionários**/**Máquinas**  
+- **manutentor**: cria **e** edita OS e Preventivas; **sem** excluir; **sem** acesso a **Funcionários**/**Máquinas**  
+- **admin**: acesso **total**
+"""
+)
+
+st.info(
+    "As permissões de criar/editar/excluir são aplicadas **dentro** das páginas. "
+    "Se um botão/ação não aparece para você, seu papel não permite essa operação."
+)
